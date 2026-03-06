@@ -5,7 +5,7 @@ import threading
 import socket
 import psutil
 import requests
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, send_from_directory
 from flask_cors import CORS
 from datetime import datetime, timezone
 
@@ -47,8 +47,65 @@ DEVICE_IP = get_network_ip()
 # ==========================================
 # FLASK APP (The "Trap Door" for Attacks)
 # ==========================================
-app = Flask(__name__)
+REACT_BUILD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'dist')
+app = Flask(__name__, static_folder=REACT_BUILD_DIR, static_url_path='')
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 CORS(app)  # Allow attacks from web UI
+
+# ==========================================
+# DISK I/O ACTIVITY TRACKER (matches Task Manager %)
+# ==========================================
+_disk_activity_percent = 0.0
+_disk_activity_lock = threading.Lock()
+
+def disk_activity_loop():
+    """Background thread to measure disk I/O activity percentage (Windows-compatible)"""
+    global _disk_activity_percent
+    while True:
+        try:
+            io1 = psutil.disk_io_counters()
+            if io1 is None:
+                # Fallback: use disk space usage if I/O counters unavailable
+                try:
+                    drive = 'C:\\' if os.name == 'nt' else '/'
+                    usage = psutil.disk_usage(drive)
+                    with _disk_activity_lock:
+                        _disk_activity_percent = round(usage.percent, 1)
+                except Exception:
+                    pass
+                time.sleep(2)
+                continue
+
+            time.sleep(1)
+            io2 = psutil.disk_io_counters()
+            if io2 is None:
+                time.sleep(1)
+                continue
+
+            # Time-based busy calculation (read_time + write_time in ms)
+            read_time_delta = io2.read_time - io1.read_time
+            write_time_delta = io2.write_time - io1.write_time
+            busy_ms = read_time_delta + write_time_delta
+            # 1000ms in 1 second -> divide by 10 for percentage
+            time_pct = min(busy_ms / 10.0, 100.0)
+
+            # Throughput-based estimation (for NVMe SSDs where time deltas can be tiny)
+            read_bytes_delta = io2.read_bytes - io1.read_bytes
+            write_bytes_delta = io2.write_bytes - io1.write_bytes
+            total_bytes = read_bytes_delta + write_bytes_delta
+            # Rough estimate: assume ~500 MB/s max throughput for SSD
+            throughput_pct = min((total_bytes / (500 * 1024 * 1024)) * 100, 100.0)
+
+            # Use the higher of time-based or throughput-based for better accuracy
+            activity = max(time_pct, throughput_pct)
+
+            with _disk_activity_lock:
+                _disk_activity_percent = round(activity, 1)
+        except Exception as e:
+            with _disk_activity_lock:
+                _disk_activity_percent = 0.0
+        time.sleep(1)
 
 # ==========================================
 # SECURITY: Rate Limiting & Attack Detection
@@ -287,7 +344,7 @@ init_devices(SECTOR)
 
 @app.route('/')
 def home():
-    return render_template('index.html')
+    return send_from_directory(REACT_BUILD_DIR, 'index.html')
 
 @app.route('/status')
 def status():
@@ -311,11 +368,18 @@ def list_devices():
 def health():
     """Get current system health metrics"""
     try:
-        cpu_percent = psutil.cpu_percent(interval=None)
+        cpu_percent = psutil.cpu_percent(interval=1)
         memory_info = psutil.virtual_memory()
-        disk_info = psutil.disk_usage('/')
         boot_time = datetime.fromtimestamp(psutil.boot_time())
         uptime_seconds = int(time.time() - psutil.boot_time())
+
+        # Disk I/O activity percentage (matches Task Manager)
+        with _disk_activity_lock:
+            disk_activity = _disk_activity_percent
+
+        # Disk space usage (separate metric)
+        drive = 'C:\\' if os.name == 'nt' else '/'
+        disk_info = psutil.disk_usage(drive)
 
         # Calculate Requests Per Second (RPS)
         now = time.time()
@@ -370,7 +434,8 @@ def health():
         return jsonify({
             "cpu": cpu_percent,
             "memory": memory_info.percent,
-            "disk": disk_info.percent,
+            "disk": round(disk_activity, 1),
+            "disk_space": disk_info.percent,
             "network": network_count,
             "requests_per_second": current_rps,
             "uptime_seconds": uptime_seconds,
@@ -702,7 +767,10 @@ def telemetry_loop():
             # Gather Real System Stats
             cpu_percent = psutil.cpu_percent(interval=None)
             memory_info = psutil.virtual_memory()
-            disk_info = psutil.disk_usage('/')
+
+            # Use disk I/O activity from background tracker
+            with _disk_activity_lock:
+                disk_activity = _disk_activity_percent
 
             # Calculate Requests Per Second (RPS)
             now = time.time()
@@ -731,7 +799,7 @@ def telemetry_loop():
                 "payload": {
                     "cpu": cpu_percent,
                     "memory": memory_info.percent,
-                    "disk": disk_info.percent,
+                    "disk": disk_activity,
                     "network": network_count,
                     "requests": current_rps,
                     "sector": SECTOR,
@@ -920,10 +988,17 @@ if __name__ == '__main__':
     # Register with backend
     register_with_backend()
 
+    # Start Disk I/O Activity Monitor in Background
+    disk_t = threading.Thread(target=disk_activity_loop, daemon=True)
+    disk_t.start()
+
     # Start Telemetry in Background
     t = threading.Thread(target=telemetry_loop, daemon=True)
     t.start()
 
+    # Warm up CPU percent (first call always returns 0)
+    psutil.cpu_percent(interval=None)
+
     # Start Attack Listener Web Server
-    app.run(host='0.0.0.0', port=5050)
+    app.run(host='0.0.0.0', port=5050, debug=False, use_reloader=False)
 

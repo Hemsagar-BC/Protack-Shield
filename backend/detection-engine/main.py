@@ -146,6 +146,13 @@ async def call_ml_service(event_dict: dict) -> List[AnomalyOutput]:
     """Call the Model Microservice for AI-powered detection (Layer 2)"""
     ml_anomalies = []
 
+    # Skip ML analysis for normal telemetry heartbeats (CPU/memory/disk reports)
+    # Only run ML on actual attack traffic or suspicious event types
+    event_type = event_dict.get("event_type", "")
+    normal_event_types = {"telemetry", "heartbeat", "health", "status", "registration"}
+    if event_type.lower() in normal_event_types:
+        return ml_anomalies
+
     payload = event_dict.get("payload", {})
     domain = payload.get("domain", event_dict.get("domain", "general"))
 
