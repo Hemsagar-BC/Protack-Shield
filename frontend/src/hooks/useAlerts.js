@@ -17,8 +17,6 @@ export function useAlerts() {
       const data = await fetchAlerts();
       if (data && data.length) {
         setAlerts(data);
-      } else {
-        setAlerts(mockAlerts);
       }
     })();
   }, []);

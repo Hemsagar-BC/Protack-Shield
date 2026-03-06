@@ -20,7 +20,7 @@ export function useDroppedPackets() {
   useEffect(() => {
     (async () => {
       const data = await fetchDroppedPackets();
-      setPackets(data && data.length ? data : mockDroppedPackets);
+      if (data && data.length) setPackets(data);
 
       const s = await fetchDroppedStats();
       if (s) setStats(s);

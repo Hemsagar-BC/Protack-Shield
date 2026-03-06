@@ -2,8 +2,6 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Cpu, Heart, Leaf, TrafficCone, Wifi, Server } from 'lucide-react';
 import { fetchDevices, fetchNodes } from '../../services/api';
-import { mockDevices } from '../../mock/data';
-
 const sectorConfig = {
   healthcare: { icon: Heart, color: 'text-red-400', bg: 'bg-red-400/10', border: 'border-red-400/30', label: 'Healthcare' },
   agriculture: { icon: Leaf, color: 'text-green-400', bg: 'bg-green-400/10', border: 'border-green-400/30', label: 'Agriculture' },
@@ -12,7 +10,7 @@ const sectorConfig = {
 };
 
 export default function IoTMapPanel() {
-  const [devices, setDevices] = useState(mockDevices);
+  const [devices, setDevices] = useState([]);
   const [nodes, setNodes] = useState([]);
 
   useEffect(() => {
