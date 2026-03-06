@@ -191,14 +191,19 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(fetchHealth, 2000);
     setInterval(fetchDevices, 3000); // Update devices every 3 seconds
 
-    // Update Uptime (Mock)
+    // Update Uptime from server value (includes days like Task Manager)
     let seconds = 0;
     setInterval(() => {
         seconds++;
-        const h = Math.floor(seconds / 3600).toString().padStart(2, '0');
+        const d = Math.floor(seconds / 86400);
+        const h = Math.floor((seconds % 86400) / 3600).toString().padStart(2, '0');
         const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
         const s = (seconds % 60).toString().padStart(2, '0');
-        document.getElementById('uptime').innerText = `${h}:${m}:${s}`;
+        if (d > 0) {
+            document.getElementById('uptime').innerText = `${d}:${h}:${m}:${s}`;
+        } else {
+            document.getElementById('uptime').innerText = `${h}:${m}:${s}`;
+        }
     }, 1000);
 
 

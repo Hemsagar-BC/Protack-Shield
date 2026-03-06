@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getSocket } from '../services/socket';
-import { mockTelemetry } from '../mock/data';
 
 const MAX_POINTS = 120;
 const MAX_RAW_EVENTS = 100;
@@ -44,17 +43,20 @@ export function useTelemetry() {
       if (pausedRef.current) return;
       eventCountRef.current++;
 
-      const deviceId = event.device_id || event.source_ip || 'unknown';
-      const payload = event.payload || {};
+      // API gateway sends: { deviceId, deviceName, timestamp, metrics: { cpu, memory, network, ... } }
+      // Systemapp sends via ingest: { source_ip, service, payload: { cpu, memory, ... } }
+      const deviceId = event.deviceId || event.device_id || event.source_ip || 'unknown';
+      const metrics = event.metrics || event.payload || {};
 
       // Update device registry
       setDevices(prev => ({
         ...prev,
         [deviceId]: {
           id: deviceId,
-          ip: event.source_ip,
+          name: event.deviceName || deviceId,
+          ip: event.source_ip || event.deviceId,
           lastSeen: Date.now(),
-          sector: event.domain || 'general',
+          sector: metrics.sector || event.domain || 'general',
           status: 'online',
         },
       }));
@@ -65,10 +67,10 @@ export function useTelemetry() {
       // Buffer telemetry data per device
       const point = {
         timestamp: Date.now(),
-        cpu: payload.cpu_percent ?? payload.cpu ?? Math.random() * 60 + 20,
-        memory: payload.memory_percent ?? payload.memory ?? Math.random() * 30 + 50,
-        network: (payload.network_bytes ?? payload.network_kb ?? Math.random() * 500) / 1024,
-        disk: payload.disk_percent ?? payload.disk ?? 55,
+        cpu: metrics.cpu_percent ?? metrics.cpu ?? 0,
+        memory: metrics.memory_percent ?? metrics.memory ?? 0,
+        network: metrics.network_bytes != null ? metrics.network_bytes / 1024 : (metrics.network ?? 0),
+        disk: metrics.disk_percent ?? metrics.disk ?? 0,
       };
 
       setTelemetryData(prev => {
@@ -90,12 +92,7 @@ export function useTelemetry() {
 
     socket.on('telemetry', handleTelemetry);
 
-    // Load mock data as initial buffer
-    if (!Object.keys(telemetryData).length) {
-      setTelemetryData({ 'mock-node': mockTelemetry.map((p, i) => ({ ...p, timestamp: Date.now() - (60 - i) * 2000 })) });
-      setActiveDevice('mock-node');
-      setDevices({ 'mock-node': { id: 'mock-node', ip: '127.0.0.1', lastSeen: Date.now(), sector: 'general', status: 'online' } });
-    }
+    // Dashboard starts empty — real data arrives via WebSocket
 
     return () => {
       socket.off('telemetry', handleTelemetry);

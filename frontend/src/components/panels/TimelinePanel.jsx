@@ -1,7 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { Clock, Shield, Wifi, User, Cpu, AlertTriangle, Zap } from 'lucide-react';
-import { mockTimelineEvents } from '../../mock/data';
-
 const eventConfig = {
   auth: { icon: User, color: 'text-neon-amber', bg: 'bg-neon-amber/10', border: 'border-neon-amber/30' },
   network: { icon: Wifi, color: 'text-neon-blue', bg: 'bg-neon-blue/10', border: 'border-neon-blue/30' },
@@ -12,7 +10,7 @@ const eventConfig = {
 };
 
 export default function TimelinePanel({ events: externalEvents }) {
-  const events = externalEvents?.length ? externalEvents : mockTimelineEvents;
+  const events = externalEvents || [];
 
   return (
     <motion.div

@@ -1,6 +1,6 @@
 :root {
     --bg-color: #0d0d0d;
-    --panel-bg: #111111;
+    --panel-bg: rgba(17, 17, 17, 0.75);
     --primary: #00ff41; /* Hacker Green */
     --primary-dim: rgba(0, 255, 65, 0.2);
     --alert: #ff003c; /* Cyber Red */
@@ -17,13 +17,34 @@
     padding: 0;
 }
 
+html {
+    background-color: #0d0d0d;
+}
+
 body {
-    background-color: var(--bg-color);
+    background-color: transparent;
     color: var(--text-main);
     font-family: var(--font-stack);
     height: 100vh;
     overflow: hidden;
     position: relative;
+}
+
+#ripple-grid-bg {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+#ripple-grid-bg canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
 }
 
 /* CRT Effects */
@@ -195,7 +216,7 @@ h3 {
 
 input {
     width: 100%;
-    background: #000;
+    background: #1b0202;
     border: 1px solid #444;
     color: var(--primary);
     padding: 8px;
@@ -234,7 +255,7 @@ button {
 }
 
 .btn-primary:hover {
-    background: #00cc33;
+    background: #05ce69;
     box-shadow: 0 0 15px var(--primary);
 }
 
@@ -314,7 +335,7 @@ footer {
 }
 
 .select-primary option {
-    background: #111;
+    background: #111111;
     color: var(--primary);
     padding: 10px;
 }
@@ -323,7 +344,7 @@ footer {
    IOT DEVICES PANEL STYLES
    ========================================== */
 .iot-devices {
-    background: var(--panel-bg);
+    background: rgba(17, 17, 17, 0.75);
 }
 
 .sector-label {

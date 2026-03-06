@@ -57,7 +57,7 @@ export default function Topbar({ connectionStatus = 'disconnected', stats = {}, 
         </div>
       </div>
 
-      {/* Right — Clock & Actions */}
+      {/* Right — Clock */}
       <div className="flex items-center gap-3">
         <div className="hidden sm:flex items-center gap-2 text-gray-400 text-xs">
           <Clock className="w-3.5 h-3.5" />
@@ -65,15 +65,6 @@ export default function Topbar({ connectionStatus = 'disconnected', stats = {}, 
           <span className="text-gray-600">|</span>
           <span className="font-mono text-gray-500">{time.toLocaleDateString()}</span>
         </div>
-
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={onToggleDemo}
-          className="glass-card px-3 py-1.5 rounded-lg text-xs text-neon-blue hover:bg-neon-blue/10 border border-neon-blue/30 transition-colors"
-        >
-          Demo
-        </motion.button>
       </div>
     </motion.header>
   );

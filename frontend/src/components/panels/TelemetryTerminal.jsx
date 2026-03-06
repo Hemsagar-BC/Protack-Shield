@@ -95,7 +95,8 @@ function CompactLine({ event }) {
 
   const data = event.data || {};
   const type = data.event_type || data.type || 'telemetry';
-  const source = data.source_ip || data.device_id || 'unknown';
+  const source = data.deviceName || data.deviceId || data.source_ip || data.device_id || data.service || 'unknown';
+  const metrics = data.metrics || data.payload || {};
 
   const typeColors = {
     http_request: 'text-neon-blue',
@@ -105,17 +106,22 @@ function CompactLine({ event }) {
     telemetry: 'text-neon-green',
   };
 
+  const cpuVal = metrics.cpu_percent ?? metrics.cpu;
+  const memVal = metrics.memory_percent ?? metrics.memory;
+
   return (
     <div className="flex gap-2 leading-relaxed hover:bg-white/5 px-1 rounded">
       <span className="text-gray-600 flex-shrink-0">{time}</span>
       <span className={`flex-shrink-0 ${typeColors[type] || 'text-gray-400'}`}>[{type}]</span>
       <span className="text-gray-500 flex-shrink-0">{source}</span>
       <span className="text-gray-400 truncate">
-        {data.payload
-          ? typeof data.payload === 'string'
-            ? data.payload.slice(0, 60)
-            : `cpu:${data.payload.cpu_percent?.toFixed?.(1) ?? '?'}% mem:${data.payload.memory_percent?.toFixed?.(1) ?? '?'}%`
-          : ''}
+        {cpuVal != null || memVal != null
+          ? `cpu:${cpuVal?.toFixed?.(1) ?? '?'}% mem:${memVal?.toFixed?.(1) ?? '?'}%`
+          : data.payload
+            ? typeof data.payload === 'string'
+              ? data.payload.slice(0, 60)
+              : JSON.stringify(data.payload).slice(0, 60)
+            : ''}
       </span>
     </div>
   );

@@ -1,13 +1,7 @@
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
 
-import {
-  mockAlerts,
-  mockDroppedPackets,
-  mockResponseStatus,
-  mockDevices,
-  mockTelemetry,
-} from '../mock/data';
+// Mock imports removed — dashboard starts clean until real data arrives
 
 async function request(path, options = {}) {
   if (USE_MOCK) return null;
@@ -27,7 +21,7 @@ async function request(path, options = {}) {
 // ── Alerts ──────────────────────────────────────────────
 export async function fetchAlerts(limit = 100) {
   const data = await request(`/alerts?limit=${limit}`);
-  return data?.alerts ?? data ?? mockAlerts;
+  return data?.alerts ?? data ?? [];
 }
 
 export async function acknowledgeAlert(alertId) {
@@ -42,22 +36,22 @@ export async function clearAlerts() {
 // ── IP / Dropped Packets ────────────────────────────────
 export async function fetchBlockedIPs() {
   const data = await request('/ip/blocked');
-  return data?.blocked_ips ?? data ?? mockResponseStatus.blocked_ips;
+  return data?.blocked_ips ?? data ?? [];
 }
 
 export async function fetchThrottledIPs() {
   const data = await request('/ip/throttled');
-  return data?.throttled_ips ?? data ?? mockResponseStatus.throttled_ips;
+  return data?.throttled_ips ?? data ?? [];
 }
 
 export async function fetchDroppedPackets() {
   const data = await request('/ip/dropped/stream');
-  return data?.packets ?? data ?? mockDroppedPackets;
+  return data?.packets ?? data ?? [];
 }
 
 export async function fetchDroppedStats() {
   const data = await request('/ip/dropped/stats');
-  return data ?? { sql_injection: 3, brute_force: 5, flooding: 8, xss: 2, blocked_ip: 4, rate_limit: 6 };
+  return data ?? { sql_injection: 0, brute_force: 0, flooding: 0, xss: 0, blocked_ip: 0, rate_limit: 0 };
 }
 
 export async function blockIP(ip, reason = 'manual', severity = 'HIGH') {
@@ -85,7 +79,7 @@ export async function fetchResponseStatus() {
 
   // fallback: query response engine directly
   const re = await request('http://localhost:8004/status'.replace(API_BASE, ''));
-  return re ?? mockResponseStatus;
+  return re ?? { blocked_ips: [], throttled_ips: [], isolated_services: [] };
 }
 
 export async function executePlaybook(alertData) {
@@ -129,7 +123,7 @@ export async function fetchDevices() {
   // Try ingest service nodes first
   const nodes = await fetchNodes();
   if (nodes && nodes.length > 0) return nodes;
-  return mockDevices;
+  return [];
 }
 
 // ── Telemetry ───────────────────────────────────────────

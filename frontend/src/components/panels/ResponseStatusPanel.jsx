@@ -5,12 +5,10 @@ import {
   fetchBlockedIPs, fetchThrottledIPs, fetchResponseStatus,
   unblockIP, unthrottleIP, restoreService, clearAllBlocks,
 } from '../../services/api';
-import { mockResponseStatus } from '../../mock/data';
-
 export default function ResponseStatusPanel() {
-  const [blockedIPs, setBlockedIPs] = useState(mockResponseStatus.blocked_ips);
-  const [throttledIPs, setThrottledIPs] = useState(mockResponseStatus.throttled_ips);
-  const [isolatedServices, setIsolatedServices] = useState(mockResponseStatus.isolated_services);
+  const [blockedIPs, setBlockedIPs] = useState([]);
+  const [throttledIPs, setThrottledIPs] = useState([]);
+  const [isolatedServices, setIsolatedServices] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const loadData = async () => {
@@ -21,8 +19,8 @@ export default function ResponseStatusPanel() {
         fetchThrottledIPs(),
         fetchResponseStatus(),
       ]);
-      if (blocked) setBlockedIPs(Array.isArray(blocked) ? blocked : mockResponseStatus.blocked_ips);
-      if (throttled) setThrottledIPs(Array.isArray(throttled) ? throttled : mockResponseStatus.throttled_ips);
+      if (blocked) setBlockedIPs(Array.isArray(blocked) ? blocked : []);
+      if (throttled) setThrottledIPs(Array.isArray(throttled) ? throttled : []);
       if (status?.isolated_services) setIsolatedServices(status.isolated_services);
     } catch (e) {
       console.warn('Failed to load response status:', e);
