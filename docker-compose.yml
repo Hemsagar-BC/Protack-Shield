@@ -1,0 +1,118 @@
+version: "3.8"
+
+services:
+  # ─── Ingest Service (Port 8001) ───
+  ingest-service:
+    build:
+      context: ./backend/ingest-service
+    container_name: threatops-ingest
+    ports:
+      - "8001:8001"
+    environment:
+      - PORT=8001
+      - DETECTION_ENGINE_URL=http://detection-engine:8002
+      - API_GATEWAY_URL=http://api-gateway:3001
+    depends_on:
+      - detection-engine
+      - api-gateway
+    restart: unless-stopped
+
+  # ─── API Gateway (Port 3001) ───
+  api-gateway:
+    build:
+      context: ./backend/api-gateway
+    container_name: threatops-gateway
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - INGEST_SERVICE_URL=http://ingest-service:8001
+      - RESPONSE_ENGINE_URL=http://response-engine:8004
+    restart: unless-stopped
+
+  # ─── Detection Engine (Port 8002) ───
+  detection-engine:
+    build:
+      context: ./backend/detection-engine
+    container_name: threatops-detection
+    ports:
+      - "8002:8002"
+    environment:
+      - PORT=8002
+      - ALERT_MANAGER_URL=http://alert-manager:8003
+      - MODEL_SERVICE_URL=http://model-microservice:8006
+    depends_on:
+      - alert-manager
+    restart: unless-stopped
+
+  # ─── Alert Manager (Port 8003) ───
+  alert-manager:
+    build:
+      context: ./backend/alert-manager
+    container_name: threatops-alert
+    ports:
+      - "8003:8003"
+    environment:
+      - PORT=8003
+      - API_GATEWAY_URL=http://api-gateway:3001
+      - RESPONSE_ENGINE_URL=http://response-engine:8004
+      - ENABLE_EMAIL=false
+      # Uncomment and fill these if you want email alerts:
+      # - RESEND_API_KEY=your_resend_api_key_here
+      # - EMAIL_FROM=alerts@yourdomain.com
+      # - EMAIL_TO=admin@yourdomain.com
+    depends_on:
+      - api-gateway
+      - response-engine
+    restart: unless-stopped
+
+  # ─── Response Engine (Port 8004) ───
+  response-engine:
+    build:
+      context: ./backend/response-engine
+    container_name: threatops-response
+    ports:
+      - "8004:8004"
+    environment:
+      - PORT=8004
+      - API_GATEWAY_URL=http://api-gateway:3001
+      - ENABLE_SYSTEM_BLOCKING=false
+    restart: unless-stopped
+
+  # ─── Model Microservice (Port 8006) ───
+  model-microservice:
+    build:
+      context: ./model_microservice
+    container_name: threatops-model
+    ports:
+      - "8006:8006"
+    restart: unless-stopped
+
+  # ─── System App / Victim Agent (Port 5050) ───
+  systemapp:
+    build:
+      context: ./systemapp
+    container_name: threatops-systemapp
+    ports:
+      - "5050:5050"
+    environment:
+      - MAIN_SERVER_URL=http://ingest-service:8001/ingest
+      - RESPONSE_ENGINE_URL=http://response-engine:8004
+    depends_on:
+      - ingest-service
+    restart: unless-stopped
+
+  # ─── Frontend Dashboard (Port 8080) ───
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        - VITE_API_URL=http://localhost:3001/api
+        - VITE_SOCKET_URL=http://localhost:3001
+        - VITE_USE_MOCK=false
+    container_name: threatops-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
