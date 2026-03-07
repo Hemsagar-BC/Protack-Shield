@@ -1,12 +1,14 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Shield, Play, AlertTriangle, Clock, Brain, FileJson } from 'lucide-react';
+import { X, Shield, Play, AlertTriangle, Clock, Brain, FileJson, Sparkles, Loader2 } from 'lucide-react';
 import { useState } from 'react';
-import { executePlaybook } from '../../services/api';
+import { executePlaybook, explainAlert } from '../../services/api';
 import { mockPlaybooks } from '../../mock/data';
 
-export default function AlertDetailModal({ alert, onClose }) {
+export default function AlertDetailModal({ alert, onClose, onAlertUpdate }) {
   const [executing, setExecuting] = useState(false);
   const [executed, setExecuted] = useState(false);
+  const [explaining, setExplaining] = useState(false);
+  const [explanation, setExplanation] = useState(alert?.explanation || null);
 
   if (!alert) return null;
 
@@ -38,6 +40,22 @@ export default function AlertDetailModal({ alert, onClose }) {
   };
 
   const color = severityColors[alert.severity] || severityColors.info;
+
+  const handleExplain = async () => {
+    if (explanation || explaining) return;
+    setExplaining(true);
+    try {
+      const result = await explainAlert(alert.id);
+      if (result) {
+        setExplanation(result);
+        if (onAlertUpdate) onAlertUpdate(alert.id, { explanation: result });
+      }
+    } catch (err) {
+      console.error('Explanation failed:', err);
+    } finally {
+      setExplaining(false);
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -102,6 +120,52 @@ export default function AlertDetailModal({ alert, onClose }) {
             <pre className="bg-black/40 border border-white/10 rounded-lg p-4 text-xs font-mono text-gray-300 overflow-x-auto whitespace-pre-wrap">
               {JSON.stringify(alert.evidence || {}, null, 2)}
             </pre>
+          </div>
+
+          {/* AI Explanation */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-neon-purple" />
+                <h3 className="text-sm font-semibold text-gray-300">AI Explanation</h3>
+              </div>
+              {!explanation && (
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  disabled={explaining}
+                  onClick={handleExplain}
+                  className="px-3 py-1 bg-neon-purple/20 text-neon-purple rounded-lg text-xs font-semibold hover:bg-neon-purple/30 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {explaining ? (
+                    <>
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      Analyzing...
+                    </>
+                  ) : (
+                    <>
+                      <Brain className="w-3 h-3" />
+                      Generate
+                    </>
+                  )}
+                </motion.button>
+              )}
+            </div>
+
+            {explanation ? (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="space-y-3"
+              >
+                <ExplanationCard label="Summary" value={explanation.summary} color="text-neon-cyan" />
+                <ExplanationCard label="Risk" value={explanation.risk} color="text-neon-red" />
+                <ExplanationCard label="Action Taken" value={explanation.action_taken} color="text-neon-green" />
+                <ExplanationCard label="Recommendation" value={explanation.recommendation} color="text-neon-amber" />
+              </motion.div>
+            ) : !explaining ? (
+              <p className="text-xs text-gray-500 italic">Click "Generate" to get an AI-powered explanation of this threat.</p>
+            ) : null}
           </div>
 
           {/* Playbooks */}
@@ -183,6 +247,15 @@ function InfoBox({ label, value, icon }) {
         {icon}
         {value}
       </p>
+    </div>
+  );
+}
+
+function ExplanationCard({ label, value, color }) {
+  return (
+    <div className="bg-black/30 border border-white/5 rounded-lg p-3">
+      <p className={`text-[10px] uppercase tracking-wider mb-1 font-bold ${color}`}>{label}</p>
+      <p className="text-sm text-gray-300 leading-relaxed">{value}</p>
     </div>
   );
 }

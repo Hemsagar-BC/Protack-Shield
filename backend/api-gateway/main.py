@@ -16,6 +16,7 @@ from ip_middleware import setup_ip_middleware, process_event_queue, set_socket_i
 PORT = int(os.environ.get("PORT", 3001))
 INGEST_SERVICE_URL = os.environ.get("INGEST_SERVICE_URL", "http://localhost:8001")
 RESPONSE_ENGINE_URL = os.environ.get("RESPONSE_ENGINE_URL", "http://localhost:8004")
+ALERT_MANAGER_URL = os.environ.get("ALERT_MANAGER_URL", "http://localhost:8003")
 
 class TelemetryEvent(BaseModel):
     event_id: str
@@ -37,6 +38,7 @@ class AlertEvent(BaseModel):
     acknowledged: bool = False
     evidence: dict = None
     recommendation: str = None
+    explanation: dict = None
 
 class HealthResponse(BaseModel):
     status: str = "healthy"
@@ -197,6 +199,79 @@ async def receive_device_status(data: dict):
         return {"status": "broadcast", "clients": len(connected_clients)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/internal/alert-explained", tags=["Internal"])
+async def receive_alert_explanation(data: dict):
+    """Broadcast AI explanation for an alert via WebSocket."""
+    try:
+        await sio.emit('alert:explained', {
+            "alert_id": data.get("alert_id"),
+            "explanation": data.get("explanation"),
+        })
+        return {"status": "broadcast", "clients": len(connected_clients)}
+    except Exception as e:
+        print(f"Alert explanation broadcast error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ==========================================
+# ALERT MANAGEMENT PROXY
+# ==========================================
+
+@app.get("/alerts", tags=["Alerts"])
+async def proxy_get_alerts(limit: int = 50):
+    """Proxy to Alert Manager /alerts"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{ALERT_MANAGER_URL}/alerts?limit={limit}",
+                timeout=aiohttp.ClientTimeout(total=5)
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                return {"alerts": [], "count": 0}
+    except aiohttp.ClientError:
+        return {"alerts": [], "count": 0}
+
+@app.post("/alerts/{alert_id}/acknowledge", tags=["Alerts"])
+async def proxy_acknowledge_alert(alert_id: str):
+    """Proxy to Alert Manager /alerts/{id}/acknowledge"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{ALERT_MANAGER_URL}/alerts/{alert_id}/acknowledge",
+                timeout=aiohttp.ClientTimeout(total=5)
+            ) as resp:
+                return await resp.json()
+    except aiohttp.ClientError as e:
+        raise HTTPException(status_code=503, detail=f"Alert Manager unavailable: {e}")
+
+@app.post("/alerts/{alert_id}/explain", tags=["Alerts"])
+async def proxy_explain_alert(alert_id: str):
+    """Proxy to Alert Manager /alerts/{id}/explain for AI explanation"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{ALERT_MANAGER_URL}/alerts/{alert_id}/explain",
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                raise HTTPException(status_code=resp.status, detail="Explain request failed")
+    except aiohttp.ClientError as e:
+        raise HTTPException(status_code=503, detail=f"Alert Manager unavailable: {e}")
+
+@app.delete("/alerts", tags=["Alerts"])
+async def proxy_clear_alerts():
+    """Proxy to Alert Manager DELETE /alerts"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(
+                f"{ALERT_MANAGER_URL}/alerts",
+                timeout=aiohttp.ClientTimeout(total=5)
+            ) as resp:
+                return await resp.json()
+    except aiohttp.ClientError as e:
+        raise HTTPException(status_code=503, detail=f"Alert Manager unavailable: {e}")
 
 # ==========================================
 # IP MANAGEMENT API

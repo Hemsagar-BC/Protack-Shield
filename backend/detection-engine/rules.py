@@ -96,6 +96,8 @@ def detect_sql_injection(event: Dict[str, Any]) -> Optional[AnomalySignal]:
     # If already identified as SQLi or blocked
     if event_type in ["sqli_attack", "sqli_blocked", "sql_injection_attempt"]:
         source_ip = get_source_ip()
+        if _attack_on_cooldown("sql_injection", source_ip):
+            return None
 
         return AnomalySignal(
             anomaly_id="",
@@ -134,6 +136,8 @@ def detect_sql_injection(event: Dict[str, Any]) -> Optional[AnomalySignal]:
     if suspicious_values:
         # Get source_ip using same robust extraction
         source_ip = get_source_ip()
+        if _attack_on_cooldown("sql_injection", source_ip):
+            return None
 
         return AnomalySignal(
             anomaly_id="",  # Will be assigned by caller
@@ -204,6 +208,8 @@ def detect_xss(event: Dict[str, Any]) -> Optional[AnomalySignal]:
     # If already identified as XSS by upstream
     if event_type in ["xss_attack", "xss_blocked", "xss_attempt"]:
         source_ip = get_source_ip()
+        if _attack_on_cooldown("xss_attack", source_ip):
+            return None
         return AnomalySignal(
             anomaly_id="",
             rule_id="xss_attack",
@@ -237,6 +243,8 @@ def detect_xss(event: Dict[str, Any]) -> Optional[AnomalySignal]:
 
     if suspicious_values:
         source_ip = get_source_ip()
+        if _attack_on_cooldown("xss_attack", source_ip):
+            return None
         return AnomalySignal(
             anomaly_id="",
             rule_id="xss_attack",
@@ -348,12 +356,42 @@ def detect_rate_spike(event: Dict[str, Any]) -> Optional[AnomalySignal]:
 # ============================================
 # Metric Threshold Detection
 # ============================================
+
+# Cooldown for metric alerts to prevent spam (rule_id -> last_alert_timestamp)
+_metric_cooldown: Dict[str, float] = {}
+METRIC_COOLDOWN_SECONDS = 120  # 2 minutes between metric alerts of the same type
+
+def _metric_on_cooldown(rule_id: str) -> bool:
+    """Check if a metric rule is on cooldown to prevent alert spam."""
+    now = time.time()
+    last = _metric_cooldown.get(rule_id, 0)
+    if now - last < METRIC_COOLDOWN_SECONDS:
+        return True
+    _metric_cooldown[rule_id] = now
+    return False
+
+# Cooldown for attack alerts to prevent spam (keyed by rule_id + source_ip)
+_attack_cooldown: Dict[str, float] = {}
+ATTACK_COOLDOWN_SECONDS = 30  # 30 seconds between same attack type from same IP
+
+def _attack_on_cooldown(rule_id: str, source_ip: str) -> bool:
+    """Check if an attack rule is on cooldown for a given source IP."""
+    key = f"{rule_id}:{source_ip}"
+    now = time.time()
+    last = _attack_cooldown.get(key, 0)
+    if now - last < ATTACK_COOLDOWN_SECONDS:
+        return True
+    _attack_cooldown[key] = now
+    return False
+
 def detect_high_cpu(event: Dict[str, Any]) -> Optional[AnomalySignal]:
     """Detect high CPU usage"""
     payload = event.get("payload", {})
     cpu = payload.get("cpu")
 
     if cpu is not None and cpu > 85:
+        if _metric_on_cooldown("high_cpu"):
+            return None
         return AnomalySignal(
             anomaly_id="",
             rule_id="high_cpu",
@@ -378,6 +416,8 @@ def detect_high_memory(event: Dict[str, Any]) -> Optional[AnomalySignal]:
     memory = payload.get("memory")
 
     if memory is not None and memory > 90:
+        if _metric_on_cooldown("high_memory"):
+            return None
         return AnomalySignal(
             anomaly_id="",
             rule_id="high_memory",
@@ -402,6 +442,8 @@ def detect_high_network(event: Dict[str, Any]) -> Optional[AnomalySignal]:
     network = payload.get("network")
 
     if network is not None and network > 900:
+        if _metric_on_cooldown("high_network"):
+            return None
         return AnomalySignal(
             anomaly_id="",
             rule_id="high_network",

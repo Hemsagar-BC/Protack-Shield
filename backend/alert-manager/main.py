@@ -9,6 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import aiohttp
 
+from llm_explainer import generate_threat_explanation
+
 PORT = int(os.environ.get("PORT", 8003))
 API_GATEWAY_URL = os.environ.get("API_GATEWAY_URL", "http://localhost:3001")
 RESPONSE_ENGINE_URL = os.environ.get("RESPONSE_ENGINE_URL", "http://localhost:8004")
@@ -37,6 +39,7 @@ class Alert(BaseModel):
     recommendation: Optional[str] = None
     anomaly_id: Optional[str] = None
     rule_id: Optional[str] = None
+    explanation: Optional[dict] = None
 
 class HealthResponse(BaseModel):
     status: str = "healthy"
@@ -230,6 +233,14 @@ async def receive_anomaly(anomaly: AnomalySignal):
 
         print(f"Alert generated: {alert.title} ({alert.severity})")
 
+        # Generate AI explanation asynchronously
+        try:
+            explanation = await generate_threat_explanation(alert.model_dump())
+            alert.explanation = explanation
+            print(f"AI explanation generated for alert {alert.id}")
+        except Exception as e:
+            print(f"Explanation generation failed: {e}")
+
         await forward_to_gateway(alert)
 
         try:
@@ -287,6 +298,35 @@ async def clear_alerts():
     global alert_history
     alert_history = []
     return {"status": "cleared"}
+
+@app.post("/alerts/{alert_id}/explain", tags=["Alerts"])
+async def explain_alert(alert_id: str):
+    """Generate or retrieve AI explanation for a specific alert."""
+    for alert in alert_history:
+        if alert.id == alert_id:
+            if alert.explanation:
+                return {"alert_id": alert_id, "explanation": alert.explanation}
+            explanation = await generate_threat_explanation(alert.model_dump())
+            alert.explanation = explanation
+            # Forward explanation to gateway for WebSocket broadcast
+            await forward_explanation_to_gateway(alert_id, explanation)
+            return {"alert_id": alert_id, "explanation": explanation}
+    raise HTTPException(status_code=404, detail="Alert not found")
+
+async def forward_explanation_to_gateway(alert_id: str, explanation: dict):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{API_GATEWAY_URL}/internal/alert-explained",
+                json={"alert_id": alert_id, "explanation": explanation},
+                timeout=aiohttp.ClientTimeout(total=5)
+            ) as resp:
+                if resp.status == 200:
+                    print(f"Explanation forwarded to gateway for alert {alert_id}")
+                else:
+                    print(f"Gateway explanation forward responded: {resp.status}")
+    except aiohttp.ClientError as e:
+        print(f"Could not forward explanation to gateway: {e}")
 
 if __name__ == "__main__":
     import uvicorn

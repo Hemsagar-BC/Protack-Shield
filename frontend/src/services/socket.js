@@ -125,3 +125,26 @@ function createMockSocket() {
   socket = mockSocket;
   return mockSocket;
 }
+
+// ── Helper exports expected by hooks ────────────────────
+export function connectSocket() {
+  return getSocket();
+}
+
+export function subscribeToTelemetry(callback) {
+  const s = getSocket();
+  s.on('telemetry', callback);
+  return () => s.off('telemetry', callback);
+}
+
+export function onConnect(callback) {
+  const s = getSocket();
+  s.on('connect', callback);
+  return () => s.off('connect', callback);
+}
+
+export function onDisconnect(callback) {
+  const s = getSocket();
+  s.on('disconnect', callback);
+  return () => s.off('disconnect', callback);
+}

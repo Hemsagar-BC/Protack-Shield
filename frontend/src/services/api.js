@@ -137,3 +137,9 @@ export async function checkGatewayHealth() {
   const data = await request('/health');
   return data ?? { status: 'unknown' };
 }
+
+// ── AI Explanation ──────────────────────────────────────
+export async function explainAlert(alertId) {
+  const data = await request(`/alerts/${alertId}/explain`, { method: 'POST' });
+  return data?.explanation ?? null;
+}

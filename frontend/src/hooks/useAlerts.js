@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getSocket } from '../services/socket';
-import { fetchAlerts, acknowledgeAlert as ackAlertAPI } from '../services/api';
+import { acknowledgeAlert as ackAlertAPI, clearAlerts as clearAlertsAPI } from '../services/api';
 import { mockAlerts } from '../mock/data';
 
 const ALERT_COOLDOWN = 30000; // 30 seconds per rule type
@@ -11,14 +11,9 @@ export function useAlerts() {
   const [filter, setFilter] = useState('all');
   const cooldownMap = useRef({});
 
-  // Initial fetch
+  // Clear backend alert history on mount so refresh starts fresh
   useEffect(() => {
-    (async () => {
-      const data = await fetchAlerts();
-      if (data && data.length) {
-        setAlerts(data);
-      }
-    })();
+    clearAlertsAPI();
   }, []);
 
   // WebSocket alerts
@@ -43,8 +38,19 @@ export function useAlerts() {
       });
     };
 
+    const handleExplained = ({ alert_id, explanation }) => {
+      if (!alert_id || !explanation) return;
+      setAlerts(prev =>
+        prev.map(a => a.id === alert_id ? { ...a, explanation } : a)
+      );
+    };
+
     socket.on('alert', handleAlert);
-    return () => socket.off('alert', handleAlert);
+    socket.on('alert:explained', handleExplained);
+    return () => {
+      socket.off('alert', handleAlert);
+      socket.off('alert:explained', handleExplained);
+    };
   }, []);
 
   const acknowledgeAlert = useCallback(async (alertId) => {

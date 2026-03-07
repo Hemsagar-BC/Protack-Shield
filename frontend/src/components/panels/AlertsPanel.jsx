@@ -92,6 +92,9 @@ export default function AlertsPanel({ alerts, filter, setFilter, onAcknowledge, 
         <AlertDetailModal
           alert={selectedAlert}
           onClose={() => setSelectedAlert(null)}
+          onAlertUpdate={(id, updates) => {
+            setSelectedAlert(prev => prev && prev.id === id ? { ...prev, ...updates } : prev);
+          }}
         />
       )}
     </>
