@@ -110,26 +110,7 @@ export default function AttackArsenal({ onLaunch, isAttacking, onStop, sector })
 
       {/* Bottom action buttons */}
       <div className="flex gap-3">
-        {!isAttacking ? (
-          <>
-            <button
-              onClick={selected ? handleLaunchSelected : () => onLaunch('ddos')}
-              className={`flex-1 py-2 rounded-lg text-xs font-medium uppercase tracking-wider cursor-pointer transition-all duration-200 ${
-                selected
-                  ? 'bg-red-600 hover:bg-red-500 text-white hover:shadow-[0_0_20px_rgba(239,68,68,0.3)]'
-                  : 'bg-red-600 hover:bg-red-500 text-white hover:shadow-[0_0_20px_rgba(239,68,68,0.3)]'
-              }`}
-            >
-              🚀 {selected ? `Launch ${selected.toUpperCase()}` : 'Launch All'}
-            </button>
-            <button
-              onClick={() => onLaunch('scan')}
-              className="flex-1 bg-[#0b1120] text-slate-300 border border-white/10 py-2 rounded-lg text-xs font-medium uppercase tracking-wider cursor-pointer transition-all duration-200 hover:border-red-500/30 hover:text-red-400 hover:bg-red-500/5"
-            >
-              🔄 Recon Scan
-            </button>
-          </>
-        ) : (
+        {isAttacking && (
           <button
             onClick={onStop}
             className="flex-1 bg-red-800 hover:bg-red-900 text-white py-2 rounded-lg text-xs font-medium uppercase tracking-wider cursor-pointer transition-all duration-200 pulse-critical"
