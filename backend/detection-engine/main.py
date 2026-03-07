@@ -161,17 +161,20 @@ async def call_ml_service(event_dict: dict) -> List[AnomalyOutput]:
         # For Auth attempts, use username as payload for SQLi/Pattern detection
         text_payload = payload.get("query") or payload.get("username") or ""
 
+        # Use actual network_data from the event if present, otherwise build defaults
+        network_data = payload.get("network_data", {
+            "Rate": payload.get("requests", 0) * 100,
+            "syn_count": payload.get("syn_count", payload.get("network", 0)),
+            "rst_count": 0,
+            "IAT": 500,
+            "Number": payload.get("requests", 5)
+        })
+
         ml_request = {
             "sector": domain,
             "payload": text_payload,
             "sensor_data": payload.get("sensor_data", []),
-            "network_data": {
-                "Rate": payload.get("requests", 0) * 100,
-                "syn_count": payload.get("syn_count", payload.get("network", 0)),
-                "rst_count": 0,
-                "IAT": 500,
-                "Number": payload.get("requests", 5)
-            }
+            "network_data": network_data
         }
 
         async with aiohttp.ClientSession() as session:

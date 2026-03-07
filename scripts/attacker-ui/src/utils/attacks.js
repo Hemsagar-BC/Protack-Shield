@@ -1,4 +1,4 @@
-import { getSqlPayload, getCctvAttackType, getAttackPayload } from './payloads'
+import { getSqlPayload, getXssPayload, getCctvAttackType, getAttackPayload } from './payloads'
 
 /**
  * Execute a direct-mode attack against a target.
@@ -33,6 +33,13 @@ export async function runDirectAttack({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query: payload }),
           })
+        } else if (type === 'xss') {
+          const payload = getXssPayload(currentId)
+          res = await fetch(`${target}/data`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: payload }),
+          })
         } else if (type === 'brute') {
           res = await fetch(`${target}/login`, {
             method: 'POST',
@@ -42,8 +49,13 @@ export async function runDirectAttack({
         } else if (type === 'ddos') {
           res = await fetch(`${target}/?t=${Date.now()}_${currentId}`)
         } else if (type === 'scan') {
-          await new Promise((r) => setTimeout(r, 50))
-          res = { ok: Math.random() > 0.8 }
+          const ports = [22, 80, 443, 3306, 5432, 8080, 8443, 27017, 6379, 9200]
+          const scanPorts = ports.sort(() => Math.random() - 0.5).slice(0, 4 + Math.floor(Math.random() * 6))
+          res = await fetch(`${target}/scan`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ports: scanPorts }),
+          })
         } else if (type === 'healthcare') {
           res = await fetch(`${target}/iomt`, {
             method: 'POST',
