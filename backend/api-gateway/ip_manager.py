@@ -24,7 +24,10 @@ class ThreatSeverity(str, Enum):
 class BlockReason(str, Enum):
     FLOODING = "flooding"
     SQL_INJECTION = "sql_injection"
+    XSS = "xss"
     BRUTE_FORCE = "brute_force"
+    PORT_SCAN = "port_scan"
+    DDOS = "ddos"
     RATE_LIMIT = "rate_limit"
     MANUAL = "manual"
     ML_DETECTED = "ml_detected"
@@ -335,7 +338,7 @@ class IPManager:
         """Periodically clean up expired blocks"""
         while self._running:
             try:
-                await asyncio.sleep(30)  # Check every 30 seconds
+                await asyncio.sleep(10)  # Check every 10 seconds
                 self._cleanup_expired()
             except asyncio.CancelledError:
                 break

@@ -131,15 +131,20 @@ def _system_unblock_ip(ip: str) -> bool:
 # Playbook Mapping
 # ============================================
 RULE_PLAYBOOKS = {
+    # --- Attack rules: auto-block attacker IP ---
     "sql_injection": [ActionType.BLOCK_IP, ActionType.ALERT_ONLY],
+    "xss_attack": [ActionType.BLOCK_IP, ActionType.ALERT_ONLY],
     "brute_force": [ActionType.BLOCK_IP, ActionType.THROTTLE],
+    "ddos_flood": [ActionType.BLOCK_IP, ActionType.THROTTLE],
+    "port_scan": [ActionType.BLOCK_IP, ActionType.ALERT_ONLY],
     "rate_spike": [ActionType.THROTTLE],
     "high_cpu": [ActionType.ALERT_ONLY],
     "high_memory": [ActionType.ISOLATE_SERVICE],
     "high_network": [ActionType.THROTTLE],
-    # ML-triggered rules
+    # --- ML-triggered rules: auto-block ---
     "ml_web_gatekeeper": [ActionType.BLOCK_IP, ActionType.ALERT_ONLY],
-    "ml_network_shield": [ActionType.THROTTLE, ActionType.ALERT_ONLY],
+    "ml_xss_brain": [ActionType.BLOCK_IP, ActionType.ALERT_ONLY],
+    "ml_network_shield": [ActionType.BLOCK_IP, ActionType.THROTTLE, ActionType.ALERT_ONLY],
     "ml_agri_guardian": [ActionType.ISOLATE_SERVICE, ActionType.ALERT_ONLY],
     "ml_health_sentinel": [ActionType.ISOLATE_SERVICE, ActionType.ALERT_ONLY],
     # Manual response (default block)

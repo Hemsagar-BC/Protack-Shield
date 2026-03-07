@@ -9,6 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import aiohttp
 
+from llm_explainer import generate_threat_explanation
+
 PORT = int(os.environ.get("PORT", 8003))
 API_GATEWAY_URL = os.environ.get("API_GATEWAY_URL", "http://localhost:3001")
 RESPONSE_ENGINE_URL = os.environ.get("RESPONSE_ENGINE_URL", "http://localhost:8004")
@@ -37,6 +39,7 @@ class Alert(BaseModel):
     recommendation: Optional[str] = None
     anomaly_id: Optional[str] = None
     rule_id: Optional[str] = None
+    explanation: Optional[dict] = None
 
 class HealthResponse(BaseModel):
     status: str = "healthy"
@@ -46,7 +49,23 @@ class HealthResponse(BaseModel):
 
 ALERT_TEMPLATES = {
     "sql_injection": {
-        "title": "🚨 SQL Injection Attempt",
+        "title": "🚨 SQL Injection Attack",
+        "severity": "critical",
+    },
+    "xss_attack": {
+        "title": "🕷️ Cross-Site Scripting (XSS) Attack",
+        "severity": "critical",
+    },
+    "brute_force": {
+        "title": "🔐 Brute Force Attack",
+        "severity": "critical",
+    },
+    "ddos_flood": {
+        "title": "⚡ Network Flood (DDoS) Attack",
+        "severity": "critical",
+    },
+    "port_scan": {
+        "title": "🔍 Port Scan Attack",
         "severity": "critical",
     },
     "rate_spike": {
@@ -64,10 +83,6 @@ ALERT_TEMPLATES = {
     "high_network": {
         "title": "📡 High Network Traffic (Data Exfiltration Risk)",
         "severity": "warning",
-    },
-    "brute_force": {
-        "title": "🔐 Brute Force Attack Detected",
-        "severity": "critical",
     },
 }
 
@@ -127,6 +142,22 @@ def generate_description(anomaly: AnomalySignal) -> str:
         fields = evidence.get("matched_fields", [])
         field_names = [f["field"] for f in fields] if fields else ["unknown field"]
         return f"Malicious SQL injection patterns detected in {', '.join(field_names)}. Source IP: {evidence.get('source_ip', 'unknown')}. This could be an attempt to extract or manipulate database data."
+
+    elif anomaly.rule_id == "xss_attack":
+        ip = evidence.get("source_ip", evidence.get("ip", "unknown"))
+        query = evidence.get("query", "")
+        snippet = (query[:60] + "...") if query and len(query) > 60 else query
+        return f"Cross-Site Scripting payload detected from {ip}. Payload: {snippet}. Attacker attempted to inject malicious scripts into the application."
+
+    elif anomaly.rule_id == "ddos_flood":
+        ip = evidence.get("source_ip", evidence.get("ip", "unknown"))
+        reason = evidence.get("reason", "Rate limit exceeded")
+        return f"Network flood (DDoS) attack from {ip}. {reason}. IP has been rate-limited to protect services."
+
+    elif anomaly.rule_id == "port_scan":
+        ip = evidence.get("source_ip", evidence.get("ip", "unknown"))
+        ports = evidence.get("ports_scanned", [])
+        return f"Port scan reconnaissance detected from {ip}. {len(ports)} ports probed. Attacker is mapping open services for further exploitation."
 
     elif anomaly.rule_id == "rate_spike":
         count = evidence.get("request_count", "unknown")
@@ -202,6 +233,14 @@ async def receive_anomaly(anomaly: AnomalySignal):
 
         print(f"Alert generated: {alert.title} ({alert.severity})")
 
+        # Generate AI explanation asynchronously
+        try:
+            explanation = await generate_threat_explanation(alert.model_dump())
+            alert.explanation = explanation
+            print(f"AI explanation generated for alert {alert.id}")
+        except Exception as e:
+            print(f"Explanation generation failed: {e}")
+
         await forward_to_gateway(alert)
 
         try:
@@ -259,6 +298,35 @@ async def clear_alerts():
     global alert_history
     alert_history = []
     return {"status": "cleared"}
+
+@app.post("/alerts/{alert_id}/explain", tags=["Alerts"])
+async def explain_alert(alert_id: str):
+    """Generate or retrieve AI explanation for a specific alert."""
+    for alert in alert_history:
+        if alert.id == alert_id:
+            if alert.explanation:
+                return {"alert_id": alert_id, "explanation": alert.explanation}
+            explanation = await generate_threat_explanation(alert.model_dump())
+            alert.explanation = explanation
+            # Forward explanation to gateway for WebSocket broadcast
+            await forward_explanation_to_gateway(alert_id, explanation)
+            return {"alert_id": alert_id, "explanation": explanation}
+    raise HTTPException(status_code=404, detail="Alert not found")
+
+async def forward_explanation_to_gateway(alert_id: str, explanation: dict):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{API_GATEWAY_URL}/internal/alert-explained",
+                json={"alert_id": alert_id, "explanation": explanation},
+                timeout=aiohttp.ClientTimeout(total=5)
+            ) as resp:
+                if resp.status == 200:
+                    print(f"Explanation forwarded to gateway for alert {alert_id}")
+                else:
+                    print(f"Gateway explanation forward responded: {resp.status}")
+    except aiohttp.ClientError as e:
+        print(f"Could not forward explanation to gateway: {e}")
 
 if __name__ == "__main__":
     import uvicorn

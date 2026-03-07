@@ -5,6 +5,7 @@ import { useState } from 'react'
 /* Standard attacks — always visible */
 const STANDARD_ATTACKS = [
   { type: 'sql',   label: 'SQL Injection',  desc: 'WEB BRAIN',       icon: '💉', status: 'ready' },
+  { type: 'xss',   label: 'XSS Attack',     desc: 'XSS BRAIN',       icon: '🕸️', status: 'ready' },
   { type: 'brute', label: 'Brute Force',    desc: 'AUTH CRACKING',   icon: '🔑', status: 'ready' },
   { type: 'ddos',  label: 'Network Flood',  desc: 'NETWORK SHIELD',  icon: '⚡', status: 'ready' },
   { type: 'scan',  label: 'Port Scan',      desc: 'RECONNAISSANCE',  icon: '🔍', status: 'ready' },
@@ -65,11 +66,8 @@ export default function AttackArsenal({ onLaunch, isAttacking, onStop, sector })
   const sectorAttacks = SECTOR_ATTACKS[sector] || []
 
   const handleSelect = (type) => {
-    setSelected((prev) => (prev === type ? null : type))
-  }
-
-  const handleLaunchSelected = () => {
-    if (selected) onLaunch(selected)
+    setSelected(type)
+    onLaunch(type)          // launch the attack immediately on click
   }
 
   return (
@@ -90,7 +88,7 @@ export default function AttackArsenal({ onLaunch, isAttacking, onStop, sector })
       <div className="text-[0.6rem] text-slate-500 uppercase tracking-widest mb-2 ml-1">Standard Attacks</div>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3 mb-4">
         {STANDARD_ATTACKS.map((attack) => (
-          <AttackCard key={attack.type} attack={attack} isSelected={selected === attack.type} onSelect={handleSelect} isAttacking={isAttacking} />
+          <AttackCard key={attack.type} attack={attack} isSelected={selected === attack.type && isAttacking} onSelect={handleSelect} isAttacking={isAttacking} />
         ))}
       </div>
 
@@ -102,7 +100,7 @@ export default function AttackArsenal({ onLaunch, isAttacking, onStop, sector })
           </div>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3 mb-4">
             {sectorAttacks.map((attack) => (
-              <AttackCard key={attack.type} attack={attack} isSelected={selected === attack.type} onSelect={handleSelect} isAttacking={isAttacking} />
+              <AttackCard key={attack.type} attack={attack} isSelected={selected === attack.type && isAttacking} onSelect={handleSelect} isAttacking={isAttacking} />
             ))}
           </div>
         </>

@@ -1,117 +1,135 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { getSocket } from '../services/socket';
+import { useState, useEffect, useCallback, useRef } from 'react'
+import {
+  connectSocket,
+  disconnectSocket,
+  subscribeToTelemetry,
+  onConnect,
+  onDisconnect
+} from '../services/socket'
 
-const MAX_POINTS = 120;
-const MAX_RAW_EVENTS = 100;
+const MAX_DATA_POINTS = 120
 
 export function useTelemetry() {
-  const [devices, setDevices] = useState({});
-  const [activeDevice, setActiveDevice] = useState(null);
-  const [telemetryData, setTelemetryData] = useState({});
-  const [rawEvents, setRawEvents] = useState([]);
-  const [isPaused, setIsPaused] = useState(false);
-  const [eventsPerMin, setEventsPerMin] = useState(0);
-  const eventCountRef = useRef(0);
-  const pausedRef = useRef(false);
+  const [isConnected, setIsConnected] = useState(false)
+  const [isPaused, setIsPaused] = useState(false)
+
+  const [deviceDataMap, setDeviceDataMap] = useState({})
+  const [devices, setDevices] = useState([])
+  const [activeDeviceId, setActiveDeviceId] = useState(null)
+
+  const [latestPoint, setLatestPoint] = useState(null)
+  const [rawEvents, setRawEvents] = useState([])
+
+  const eventIdRef = useRef(0)
 
   useEffect(() => {
-    pausedRef.current = isPaused;
-  }, [isPaused]);
+    const socket = connectSocket()
 
-  // Count events per minute
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setEventsPerMin(eventCountRef.current);
-      eventCountRef.current = 0;
-    }, 60000);
+    const unsubConnect = onConnect(() => {
+      setIsConnected(true)
+    })
 
-    // Initial estimate
-    const quickInterval = setInterval(() => {
-      setEventsPerMin(prev => Math.max(prev, eventCountRef.current * 6));
-    }, 10000);
+    const unsubDisconnect = onDisconnect(() => {
+      setIsConnected(false)
+    })
 
     return () => {
-      clearInterval(interval);
-      clearInterval(quickInterval);
-    };
-  }, []);
+      unsubConnect()
+      unsubDisconnect()
+      disconnectSocket()
+    }
+  }, [])
 
   useEffect(() => {
-    const socket = getSocket();
+    if (isPaused) return
 
-    const handleTelemetry = (event) => {
-      if (pausedRef.current) return;
-      eventCountRef.current++;
+    const unsubscribe = subscribeToTelemetry((data) => {
+      const timestamp = new Date(data.timestamp)
+      const timeLabel = timestamp.toLocaleTimeString('en-US', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      })
 
-      // API gateway sends: { deviceId, deviceName, timestamp, metrics: { cpu, memory, network, ... } }
-      // Systemapp sends via ingest: { source_ip, service, payload: { cpu, memory, ... } }
-      const deviceId = event.deviceId || event.device_id || event.source_ip || 'unknown';
-      const metrics = event.metrics || event.payload || {};
+      const chartPoint = {
+        time: timeLabel,
+        timestamp: timestamp.getTime(),
+        cpu: Math.round(data.metrics.cpu * 10) / 10,
+        memory: Math.round(data.metrics.memory * 10) / 10,
+        network: Math.round(data.metrics.network),
+        requests: data.metrics.requests,
+        deviceId: data.deviceId,
+        deviceName: data.deviceName,
+        devices: data.metrics.devices || {},
+        sector: data.metrics.sector || 'unknown'
+      }
 
-      // Update device registry
-      setDevices(prev => ({
-        ...prev,
-        [deviceId]: {
-          id: deviceId,
-          name: event.deviceName || deviceId,
-          ip: event.source_ip || event.deviceId,
-          lastSeen: Date.now(),
-          sector: metrics.sector || event.domain || 'general',
-          status: 'online',
-        },
-      }));
+      setDevices(prev => {
+        if (!prev.find(d => d.id === data.deviceId)) {
+          return [...prev, { id: data.deviceId, name: data.deviceName }]
+        }
+        return prev
+      })
 
-      // Set active device if none selected
-      setActiveDevice(prev => prev || deviceId);
+      setActiveDeviceId(prev => prev || data.deviceId)
 
-      // Buffer telemetry data per device
-      const point = {
-        timestamp: Date.now(),
-        cpu: metrics.cpu_percent ?? metrics.cpu ?? 0,
-        memory: metrics.memory_percent ?? metrics.memory ?? 0,
-        network: metrics.network_bytes != null ? metrics.network_bytes / 1024 : (metrics.network ?? 0),
-        disk: metrics.disk_percent ?? metrics.disk ?? 0,
-      };
+      setDeviceDataMap(prev => {
+        const currentBuffer = prev[data.deviceId] || []
+        const newBuffer = [...currentBuffer, chartPoint].slice(-MAX_DATA_POINTS)
+        return { ...prev, [data.deviceId]: newBuffer }
+      })
 
-      setTelemetryData(prev => {
-        const existing = prev[deviceId] || [];
-        const updated = [...existing, point].slice(-MAX_POINTS);
-        return { ...prev, [deviceId]: updated };
-      });
+      setActiveDeviceId(currentActive => {
+        if (currentActive === data.deviceId) {
+          setLatestPoint(chartPoint)
+        }
+        return currentActive
+      })
 
-      // Raw events log
+      const rawEvent = {
+        id: eventIdRef.current++,
+        timestamp: timestamp.toISOString(),
+        deviceId: data.deviceId,
+        deviceName: data.deviceName,
+        metrics: data.metrics,
+      }
+
       setRawEvents(prev => {
-        const entry = {
-          id: event.event_id || `evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          timestamp: new Date().toISOString(),
-          data: event,
-        };
-        return [entry, ...prev].slice(0, MAX_RAW_EVENTS);
-      });
-    };
+        const updated = [rawEvent, ...prev]
+        return updated.slice(0, 100)
+      })
+    })
 
-    socket.on('telemetry', handleTelemetry);
+    return unsubscribe
+  }, [isPaused])
 
-    // Dashboard starts empty — real data arrives via WebSocket
+  const activeDeviceData = activeDeviceId ? (deviceDataMap[activeDeviceId] || []) : []
 
-    return () => {
-      socket.off('telemetry', handleTelemetry);
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const pause = useCallback(() => setIsPaused(true), [])
+  const resume = useCallback(() => setIsPaused(false), [])
+  const toggle = useCallback(() => setIsPaused(prev => !prev), [])
 
-  const togglePause = useCallback(() => setIsPaused(p => !p), []);
-
-  const currentData = telemetryData[activeDevice] || [];
+  const clearData = useCallback(() => {
+    setDeviceDataMap({})
+    setRawEvents([])
+    setLatestPoint(null)
+  }, [])
 
   return {
-    devices,
-    activeDevice,
-    setActiveDevice,
-    telemetryData: currentData,
-    allTelemetryData: telemetryData,
-    rawEvents,
+    isConnected,
     isPaused,
-    togglePause,
-    eventsPerMin,
-  };
+    telemetryData: activeDeviceData,
+    latestPoint,
+    rawEvents,
+    devices,
+    activeDeviceId,
+    setActiveDeviceId,
+    pause,
+    resume,
+    toggle,
+    clearData,
+  }
 }
+
+export default useTelemetry

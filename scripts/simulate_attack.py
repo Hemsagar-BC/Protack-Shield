@@ -18,6 +18,11 @@ ATTACKS = [
         "name": "Brute Force",
         "payload": {"action": "login", "username": "admin", "attempts": 50},
         "event_type": "auth_log"
+    },
+    {
+        "name": "Cross-Site Scripting (XSS)",
+        "payload": {"query": "<script>alert(document.cookie)</script>"},
+        "event_type": "xss_attack"
     }
 ]
 
@@ -46,9 +51,10 @@ def main():
     print("☠️  Cyber Attack Simulator initialized")
     print("1. SQL Injection")
     print("2. Brute Force")
+    print("3. Cross-Site Scripting (XSS)")
 
     while True:
-        choice = input("\nSelect attack (1-2) or 'q' to quit: ")
+        choice = input("\nSelect attack (1-3) or 'q' to quit: ")
         if choice == 'q':
             break
 
@@ -56,6 +62,8 @@ def main():
             send_attack(0)
         elif choice == '2':
             send_attack(1)
+        elif choice == '3':
+            send_attack(2)
         else:
             print("Invalid choice")
 

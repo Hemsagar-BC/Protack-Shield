@@ -118,7 +118,10 @@ async def list_actions(limit: int = 50):
 @app.post("/execute", response_model=ExecuteResponse, tags=["Execute"])
 async def execute_response(alert: Alert):
     try:
-        print(f"Executing response for: {alert.title}")
+        print(f"\n{'='*60}")
+        print(f"[RESPONSE ENGINE] Processing alert: {alert.title}")
+        print(f"[RESPONSE ENGINE] Rule ID: {alert.rule_id} | Severity: {alert.severity}")
+        print(f"[RESPONSE ENGINE] Source: {alert.source}")
 
         results = run_playbook(alert.model_dump())
 
@@ -136,7 +139,16 @@ async def execute_response(alert: Alert):
             )
             actions.append(action)
 
-            print(f"   {result.message}")
+            # Log auto-block decisions prominently
+            if result.action_type == "block_ip":
+                if result.status == "success":
+                    print(f"[AUTO-BLOCK] ✅ IP {result.target} BLOCKED for {alert.rule_id} (severity: {alert.severity})")
+                elif result.status == "skipped":
+                    print(f"[AUTO-BLOCK] ⏭️  Skipped: {result.message}")
+            else:
+                print(f"   [{result.action_type}] {result.message}")
+
+        print(f"{'='*60}\n")
 
         await emit_action_events(alert, actions)
 
@@ -178,7 +190,7 @@ async def emit_action_events(alert: Alert, actions: List[ActionOutput]):
 
 
 async def sync_block_to_gateway(ip: str, alert: Alert):
-    """Sync IP block to API Gateway's centralized IP Manager"""
+    """Sync IP block to API Gateway's centralized IP Manager + emit to dashboard"""
     if not ip or ip == "unknown" or ip == "N/A":
         return
 
@@ -186,14 +198,18 @@ async def sync_block_to_gateway(ip: str, alert: Alert):
         # Map rule_id to block reason
         reason_map = {
             "sql_injection": "sql_injection",
+            "xss_attack": "xss",
             "brute_force": "brute_force",
+            "ddos_flood": "flooding",
+            "port_scan": "port_scan",
             "rate_spike": "flooding",
             "ml_web_gatekeeper": "ml_detected",
-            "ml_network_shield": "flooding",
+            "ml_xss_brain": "ml_detected",
+            "ml_network_shield": "ml_detected",
         }
         reason = reason_map.get(alert.rule_id, "abuse")
 
-        # Map severity
+        # Map severity to TTL (LOW=60s, MEDIUM=300s, HIGH=600s, CRITICAL=900s)
         severity_map = {
             "critical": "critical",
             "high": "high",
@@ -203,24 +219,54 @@ async def sync_block_to_gateway(ip: str, alert: Alert):
         }
         severity = severity_map.get(alert.severity, "high")
 
+        # TTL based on severity
+        ttl_map = {
+            "low": 60,
+            "medium": 300,
+            "high": 600,
+            "critical": 900
+        }
+        ttl = ttl_map.get(severity, 600)
+
+        print(f"[AUTO-BLOCK SYNC] Sending block to API Gateway: IP={ip}, reason={reason}, severity={severity}, TTL={ttl}s")
+
         async with aiohttp.ClientSession() as session:
+            # 1. Block the IP at API Gateway level
             async with session.post(
                 f"{API_GATEWAY_URL}/ip/block",
                 json={
                     "ip": ip,
                     "reason": reason,
                     "severity": severity,
-                    "duration": None  # Use default based on severity
+                    "duration": ttl
                 },
                 timeout=aiohttp.ClientTimeout(total=5)
             ) as resp:
                 if resp.status == 200:
                     result = await resp.json()
-                    print(f"[Response Engine] Synced block to Gateway: {ip} -> {result.get('message')}")
+                    print(f"[AUTO-BLOCK SYNC] ✅ Gateway confirmed: {ip} blocked -> {result.get('message')}")
                 else:
-                    print(f"[Response Engine] Gateway block sync failed: {resp.status}")
+                    print(f"[AUTO-BLOCK SYNC] ❌ Gateway block failed: {resp.status}")
+
+            # 2. Push auto-block log to dashboard via device-status event
+            await session.post(
+                f"{API_GATEWAY_URL}/internal/device-status",
+                json={
+                    "type": "auto_block",
+                    "ip": ip,
+                    "rule_id": alert.rule_id,
+                    "reason": reason,
+                    "severity": severity,
+                    "ttl": ttl,
+                    "alert_title": alert.title,
+                    "message": f"🚫 Auto-blocked {ip} for {alert.rule_id} (TTL: {ttl}s)",
+                    "timestamp": datetime.utcnow().isoformat() + "Z"
+                },
+                timeout=aiohttp.ClientTimeout(total=5)
+            )
+
     except Exception as e:
-        print(f"[Response Engine] Could not sync block to Gateway: {e}")
+        print(f"[AUTO-BLOCK SYNC] ❌ Could not sync block to Gateway: {e}")
 
 
 @app.post("/block/{ip}", tags=["Manual"])

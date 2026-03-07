@@ -74,6 +74,15 @@ except FileNotFoundError:
 
 print("✅ Web Brain Online.",web_model)
 
+# --- 1b. XSS BRAIN (Scikit-Learn, dedicated XSS detector) ---
+try:
+    xss_model = joblib.load("models/xss_brain_model.pkl")
+    xss_vectorizer = joblib.load("models/xss_brain_vectorizer.pkl")
+    print("✅ XSS Brain Online.")
+except FileNotFoundError:
+    print("⚠️ XSS Brain files not found. Skipping...")
+    xss_model = None
+
 # --- 2. AGRI BRAIN (Random Forest - Scikit Learn) ---
 # FIXED: Loading the .pkl (Random Forest) instead of .pth (PyTorch)
 try:
@@ -153,16 +162,42 @@ def analyze_packet():
                 except:
                     is_attack = 0
 
+            # --- XSS-specific detection via dedicated XSS Brain ---
+            xss_heuristic = any(x in text for x in ["<script", "onerror=", "onload=", "onmouseover=", "javascript:", "alert(", "document.cookie", "eval("])
+            is_xss = 0
+            if xss_model:
+                try:
+                    xss_vec = xss_vectorizer.transform([req['payload']])
+                    is_xss = xss_model.predict(xss_vec)[0]
+                except:
+                    is_xss = 0
+
+            if is_xss == 1 or xss_heuristic:
+                log_entry = {
+                    "id": len(SYSTEM_LOGS) + 1,
+                    "timestamp": datetime.now().isoformat(),
+                    "sector": sector,
+                    "status": "blocked",
+                    "threat_level": "critical",
+                    "source": "XSS Brain",
+                    "message": "Cross-Site Scripting (XSS) Payload Detected",
+                    "attack_type": "xss",
+                    "score": 0.99
+                }
+                SYSTEM_LOGS.append(log_entry)
+                return jsonify(log_entry)
+
             if is_attack == 1 or heuristic_trigger:
                 log_entry = {
                     "id": len(SYSTEM_LOGS) + 1,
                     "timestamp": datetime.now().isoformat(),
                     "sector": sector,
                     "status": "blocked",
-                    "threat_level": "critical", # SQLi is critical
+                    "threat_level": "critical",
                     "source": "Web Gatekeeper",
-                    "message": "Malicious Web Payload Detected (SQLi/XSS)",
-                    "score": 0.99 # User request: "remove probability" -> Make it confident.
+                    "message": "Malicious Web Payload Detected (SQLi)",
+                    "attack_type": "sqli",
+                    "score": 0.99
                 }
                 SYSTEM_LOGS.append(log_entry)
                 return jsonify(log_entry)

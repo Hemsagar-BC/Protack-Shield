@@ -56,10 +56,27 @@ SQL_INJECTION_PATTERNS = [
 ]
 
 
+def _looks_like_xss(text: str) -> bool:
+    """Quick check if a string is clearly XSS rather than SQLi"""
+    xss_indicators = [
+        r"<script", r"<img[^>]+on\w+", r"<svg[^>]+on\w+", r"<iframe",
+        r"javascript\s*:", r"on(error|load|mouseover|click|focus|blur|submit)\s*=",
+        r"alert\s*\(", r"document\.(cookie|location|write)", r"eval\s*\(",
+    ]
+    for pat in xss_indicators:
+        if re.search(pat, text, re.IGNORECASE):
+            return True
+    return False
+
+
 def detect_sql_injection(event: Dict[str, Any]) -> Optional[AnomalySignal]:
     """Detect SQL injection patterns in event payload"""
     payload = event.get("payload", {})
     event_type = event.get("event_type", "")
+
+    # Skip if this event is already identified as XSS
+    if event_type in ["xss_attack", "xss_blocked", "xss_attempt"]:
+        return None
 
     # Extract source IP from multiple possible locations
     def get_source_ip():
@@ -79,6 +96,8 @@ def detect_sql_injection(event: Dict[str, Any]) -> Optional[AnomalySignal]:
     # If already identified as SQLi or blocked
     if event_type in ["sqli_attack", "sqli_blocked", "sql_injection_attempt"]:
         source_ip = get_source_ip()
+        if _attack_on_cooldown("sql_injection", source_ip):
+            return None
 
         return AnomalySignal(
             anomaly_id="",
@@ -102,6 +121,9 @@ def detect_sql_injection(event: Dict[str, Any]) -> Optional[AnomalySignal]:
     suspicious_values = []
     for key, value in payload.items():
         if isinstance(value, str):
+            # Skip values that look like XSS payloads — let the XSS rule handle them
+            if _looks_like_xss(value):
+                continue
             for pattern in SQL_INJECTION_PATTERNS:
                 if re.search(pattern, value, re.IGNORECASE):
                     suspicious_values.append({
@@ -114,6 +136,8 @@ def detect_sql_injection(event: Dict[str, Any]) -> Optional[AnomalySignal]:
     if suspicious_values:
         # Get source_ip using same robust extraction
         source_ip = get_source_ip()
+        if _attack_on_cooldown("sql_injection", source_ip):
+            return None
 
         return AnomalySignal(
             anomaly_id="",  # Will be assigned by caller
@@ -130,6 +154,112 @@ def detect_sql_injection(event: Dict[str, Any]) -> Optional[AnomalySignal]:
             },
             source_event=event,
             recommendation="Block source IP, review and sanitize input parameters"
+        )
+    return None
+
+
+# ============================================
+# Cross-Site Scripting (XSS) Detection
+# ============================================
+XSS_PATTERNS = [
+    r"<script[^>]*>.*?</script>",
+    r"<script[^>]*>",
+    r"javascript\s*:",
+    r"on\w+\s*=\s*['\"]?[^'\"]*['\"]?",
+    r"onerror\s*=",
+    r"onload\s*=",
+    r"onmouseover\s*=",
+    r"onfocus\s*=",
+    r"onblur\s*=",
+    r"onclick\s*=",
+    r"onsubmit\s*=",
+    r"alert\s*\(",
+    r"document\.cookie",
+    r"document\.location",
+    r"document\.write",
+    r"eval\s*\(",
+    r"String\.fromCharCode",
+    r"<img[^>]+on\w+\s*=",
+    r"<svg[^>]+on\w+\s*=",
+    r"<iframe[^>]*>",
+    r"<embed[^>]*>",
+    r"<object[^>]*>",
+    r"expression\s*\(",
+]
+
+
+def detect_xss(event: Dict[str, Any]) -> Optional[AnomalySignal]:
+    """Detect Cross-Site Scripting (XSS) patterns in event payload"""
+    payload = event.get("payload", {})
+    event_type = event.get("event_type", "")
+
+    def get_source_ip():
+        candidates = [
+            event.get("source_ip"),
+            payload.get("source_ip"),
+            payload.get("ip"),
+            payload.get("attacker_ip"),
+        ]
+        for ip in candidates:
+            if ip and ip not in ("unknown", "Unknown", "127.0.0.1", "localhost"):
+                return ip
+        return event.get("source_ip") or "unknown"
+
+    # If already identified as XSS by upstream
+    if event_type in ["xss_attack", "xss_blocked", "xss_attempt"]:
+        source_ip = get_source_ip()
+        if _attack_on_cooldown("xss_attack", source_ip):
+            return None
+        return AnomalySignal(
+            anomaly_id="",
+            rule_id="xss_attack",
+            rule_name="Cross-Site Scripting (XSS) Attempt",
+            severity=Severity.CRITICAL,
+            confidence=1.0,
+            description=f"XSS attack detected on {payload.get('path', 'unknown endpoint')}",
+            evidence={
+                "query": payload.get("query"),
+                "action": payload.get("action", "DETECTED"),
+                "blocked_by": payload.get("blocked_by"),
+                "source_ip": source_ip,
+                "ip": source_ip,
+            },
+            source_event=event,
+            recommendation="Already neutralized" if payload.get("action") == "BLOCKED" else "Sanitize all user inputs, implement CSP headers"
+        )
+
+    # Check all string values in payload for XSS patterns
+    suspicious_values = []
+    for key, value in payload.items():
+        if isinstance(value, str):
+            for pattern in XSS_PATTERNS:
+                if re.search(pattern, value, re.IGNORECASE):
+                    suspicious_values.append({
+                        "field": key,
+                        "value": value[:100],
+                        "pattern": pattern
+                    })
+                    break
+
+    if suspicious_values:
+        source_ip = get_source_ip()
+        if _attack_on_cooldown("xss_attack", source_ip):
+            return None
+        return AnomalySignal(
+            anomaly_id="",
+            rule_id="xss_attack",
+            rule_name="Cross-Site Scripting (XSS) Detection",
+            severity=Severity.CRITICAL,
+            confidence=0.90,
+            description=f"XSS pattern detected in {len(suspicious_values)} field(s)",
+            evidence={
+                "matched_fields": suspicious_values,
+                "source_ip": source_ip,
+                "ip": source_ip,
+                "service": event.get("service"),
+            },
+            source_event=event,
+            recommendation="Sanitize all user inputs, encode HTML output, implement Content Security Policy"
         )
     return None
 
@@ -226,12 +356,42 @@ def detect_rate_spike(event: Dict[str, Any]) -> Optional[AnomalySignal]:
 # ============================================
 # Metric Threshold Detection
 # ============================================
+
+# Cooldown for metric alerts to prevent spam (rule_id -> last_alert_timestamp)
+_metric_cooldown: Dict[str, float] = {}
+METRIC_COOLDOWN_SECONDS = 120  # 2 minutes between metric alerts of the same type
+
+def _metric_on_cooldown(rule_id: str) -> bool:
+    """Check if a metric rule is on cooldown to prevent alert spam."""
+    now = time.time()
+    last = _metric_cooldown.get(rule_id, 0)
+    if now - last < METRIC_COOLDOWN_SECONDS:
+        return True
+    _metric_cooldown[rule_id] = now
+    return False
+
+# Cooldown for attack alerts to prevent spam (keyed by rule_id + source_ip)
+_attack_cooldown: Dict[str, float] = {}
+ATTACK_COOLDOWN_SECONDS = 30  # 30 seconds between same attack type from same IP
+
+def _attack_on_cooldown(rule_id: str, source_ip: str) -> bool:
+    """Check if an attack rule is on cooldown for a given source IP."""
+    key = f"{rule_id}:{source_ip}"
+    now = time.time()
+    last = _attack_cooldown.get(key, 0)
+    if now - last < ATTACK_COOLDOWN_SECONDS:
+        return True
+    _attack_cooldown[key] = now
+    return False
+
 def detect_high_cpu(event: Dict[str, Any]) -> Optional[AnomalySignal]:
     """Detect high CPU usage"""
     payload = event.get("payload", {})
     cpu = payload.get("cpu")
 
     if cpu is not None and cpu > 85:
+        if _metric_on_cooldown("high_cpu"):
+            return None
         return AnomalySignal(
             anomaly_id="",
             rule_id="high_cpu",
@@ -256,6 +416,8 @@ def detect_high_memory(event: Dict[str, Any]) -> Optional[AnomalySignal]:
     memory = payload.get("memory")
 
     if memory is not None and memory > 90:
+        if _metric_on_cooldown("high_memory"):
+            return None
         return AnomalySignal(
             anomaly_id="",
             rule_id="high_memory",
@@ -280,6 +442,8 @@ def detect_high_network(event: Dict[str, Any]) -> Optional[AnomalySignal]:
     network = payload.get("network")
 
     if network is not None and network > 900:
+        if _metric_on_cooldown("high_network"):
+            return None
         return AnomalySignal(
             anomaly_id="",
             rule_id="high_network",
@@ -377,8 +541,72 @@ def detect_rate_spike(event: Dict[str, Any]) -> Optional[AnomalySignal]:
     event_type = event.get("event_type", "")
 
     # Skip checking rate for known attack events (reduces noise)
-    if event_type in ["sqli_attack", "sqli_blocked", "sql_injection_attempt", "iomt_attack", "sensor_attack", "traffic_attack", "auth_failure", "ddos_blocked"]:
+    if event_type in ["sqli_attack", "sqli_blocked", "sql_injection_attempt", "iomt_attack", "sensor_attack", "traffic_attack", "auth_failure", "ddos_blocked", "ddos_attack", "network_flood", "xss_attack", "xss_blocked", "xss_attempt", "port_scan", "port_scan_attack"]:
         return None
+
+
+# ============================================
+# Port Scan Detection
+# ============================================
+def detect_port_scan(event: Dict[str, Any]) -> Optional[AnomalySignal]:
+    """Detect port scan attacks"""
+    event_type = event.get("event_type", "")
+    payload = event.get("payload", {})
+
+    if event_type not in ["port_scan", "port_scan_attack"]:
+        return None
+
+    source_ip = event.get("source_ip") or payload.get("source_ip") or payload.get("ip") or "unknown"
+    ports_scanned = payload.get("ports_scanned", [])
+
+    return AnomalySignal(
+        anomaly_id="",
+        rule_id="port_scan",
+        rule_name="Port Scan Attack",
+        severity=Severity.CRITICAL,
+        confidence=0.95,
+        description=f"Port scan detected from {source_ip}. {len(ports_scanned)} ports probed.",
+        evidence={
+            "source_ip": source_ip,
+            "ip": source_ip,
+            "ports_scanned": ports_scanned,
+            "action": payload.get("action", "DETECTED"),
+        },
+        source_event=event,
+        recommendation="Block source IP, review firewall rules"
+    )
+
+
+# ============================================
+# DDoS / Network Flood Detection
+# ============================================
+def detect_ddos_flood(event: Dict[str, Any]) -> Optional[AnomalySignal]:
+    """Detect DDoS / Network Flood attacks"""
+    event_type = event.get("event_type", "")
+    payload = event.get("payload", {})
+
+    if event_type not in ["ddos_blocked", "ddos_attack", "network_flood"]:
+        return None
+
+    source_ip = event.get("source_ip") or payload.get("ip") or "unknown"
+
+    return AnomalySignal(
+        anomaly_id="",
+        rule_id="ddos_flood",
+        rule_name="Network Flood (DDoS) Attack",
+        severity=Severity.CRITICAL,
+        confidence=0.95,
+        description=f"Network flood / DDoS attack detected from {source_ip}. Rate limit exceeded.",
+        evidence={
+            "source_ip": source_ip,
+            "ip": source_ip,
+            "reason": payload.get("reason", "Rate limit exceeded"),
+            "path": payload.get("path", "/"),
+            "action": "BLOCKED",
+        },
+        source_event=event,
+        recommendation="IP has been rate-limited. Review DDoS mitigation policies."
+    )
 
 
 # ============================================
@@ -386,6 +614,9 @@ def detect_rate_spike(event: Dict[str, Any]) -> Optional[AnomalySignal]:
 # ============================================
 DETECTION_RULES = [
     ("sql_injection", detect_sql_injection),
+    ("xss_attack", detect_xss),
+    ("ddos_flood", detect_ddos_flood),
+    ("port_scan", detect_port_scan),
     ("sector_attack", detect_sector_attack),
     ("rate_spike", detect_rate_spike),
     ("high_cpu", detect_high_cpu),

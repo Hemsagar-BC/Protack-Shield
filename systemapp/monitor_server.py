@@ -281,6 +281,18 @@ SQLI_PATTERNS = [
 ]
 SQLI_REGEX = re.compile('|'.join(SQLI_PATTERNS), re.IGNORECASE)
 
+# XSS patterns
+XSS_PATTERNS = [
+    r"<script[^>]*>",
+    r"javascript\s*:",
+    r"on(error|load|mouseover|click|focus|blur|submit|toggle|drag|pointer)\s*=",
+    r"alert\s*\(",
+    r"document\.(cookie|location|write)",
+    r"eval\s*\(",
+    r"<(iframe|embed|object|svg|img)[^>]+(on\w+\s*=|src\s*=\s*['\"]?javascript)",
+]
+XSS_REGEX = re.compile('|'.join(XSS_PATTERNS), re.IGNORECASE)
+
 def is_rate_limited(ip):
     """Check if IP exceeds rate limit"""
     now = time.time()
@@ -311,6 +323,12 @@ def detect_sqli(query):
     if not query:
         return False
     return bool(SQLI_REGEX.search(query))
+
+def detect_xss(query):
+    """Detect Cross-Site Scripting patterns"""
+    if not query:
+        return False
+    return bool(XSS_REGEX.search(query))
 
 # Request counter for Telemetry
 request_count = 0
@@ -585,6 +603,43 @@ def data_endpoint():
     else:
         ip = request.remote_addr
 
+    # Check for XSS first (before SQLi, since XSS payloads may also trigger SQLi regex)
+    heuristic_xss = detect_xss(query)
+    if heuristic_xss:
+        is_blocked = random.random() < SQLI_BLOCK_RATE
+        target_device = get_target_device()
+        dev_status = None
+        if target_device:
+            dev_status = update_device_health(target_device, damage=10)
+
+        action = "BLOCKED" if is_blocked else "PROCESSED"
+        print(f"{'\U0001f6ab' if is_blocked else '\u26a0\ufe0f'} [XSS] Payload from {ip}: {query[:30]}... Status: {action} Target: {target_device}")
+
+        send_security_event("xss_attack", {
+            "query": query,
+            "network_data": {
+                 "Rate": int(request_count / max(1, time.time() - last_telemetry_time) * 100),
+                 "syn_count": 5, "rst_count": 2, "IAT": 1000
+            },
+            "ip": ip,
+            "source_ip": ip,
+            "blocked": is_blocked,
+            "action": action,
+            "device_id": target_device,
+            "device_health": dev_status["health"] if dev_status else None
+        }, attacker_ip=ip)
+
+        if is_blocked:
+            return jsonify({"error": "XSS payload detected", "blocked": True, "device_id": target_device}), 403
+
+        time.sleep(random.uniform(0.1, 0.3))
+        return jsonify({
+            "status": "xss_detected",
+            "rows": [],
+            "device_id": target_device,
+            "device_health": dev_status["health"] if dev_status else None
+        }), 200
+
     # Check for SQLi (Heuristic) - optional, backend does heavier lifting
     heuristic_sqli = detect_sqli(query)
     is_blocked = heuristic_sqli and (random.random() < SQLI_BLOCK_RATE)
@@ -624,6 +679,44 @@ def data_endpoint():
         "rows": [],
         "device_id": target_device,
         "device_health": dev_status["health"] if dev_status else None
+    }), 200
+
+# ==========================================
+# PORT SCAN ENDPOINT
+# ==========================================
+@app.route('/scan', methods=['POST'])
+def scan_endpoint():
+    """Port scan attack endpoint"""
+    data = request.json or {}
+    ip = request.remote_addr
+    ports = data.get("ports", [22, 80, 443, 3306, 5432, 8080, 8443, 27017])
+
+    # Simulate port scan detection
+    target_device = get_target_device()
+    dev_status = None
+    if target_device:
+        dev_status = update_device_health(target_device, damage=5)
+
+    # Determine which ports appear "open" (simulated)
+    open_ports = [p for p in ports if random.random() < 0.3]
+
+    print(f"🔍 [PORT SCAN] from {ip}: scanned {len(ports)} ports, {len(open_ports)} open. Target: {target_device}")
+
+    send_security_event("port_scan", {
+        "ip": ip,
+        "source_ip": ip,
+        "ports_scanned": ports,
+        "open_ports": open_ports,
+        "action": "DETECTED",
+        "device_id": target_device,
+        "device_health": dev_status["health"] if dev_status else None
+    }, attacker_ip=ip)
+
+    return jsonify({
+        "status": "scan_detected",
+        "ports_scanned": len(ports),
+        "open_ports": open_ports,
+        "device_id": target_device,
     }), 200
 
 # ==========================================

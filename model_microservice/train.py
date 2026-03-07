@@ -211,6 +211,35 @@ def train_urban_brain():
     except Exception as e:
         print(f"❌ Failed to train Urban Brain: {e}")
 
+def train_xss_brain():
+    print("\n🕷️ --- Training XSS Brain (Cross-Site Scripting Detector) ---")
+    try:
+        df = pd.read_csv(os.path.join(DATA_DIR, 'XSS_dataset.csv'))
+        df['Sentence'] = df['Sentence'].astype(str).fillna('')
+        y = df['Label']  # 0 = benign, 1 = XSS
+
+        # Char-level TF-IDF — captures <script>, onerror=, javascript:, etc.
+        vectorizer = TfidfVectorizer(min_df=2, analyzer="char", ngram_range=(2, 5), max_features=30000)
+        X = vectorizer.fit_transform(df['Sentence'])
+
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+
+        model = RandomForestClassifier(n_estimators=100, max_depth=30, n_jobs=-1, random_state=42)
+        model.fit(X_train, y_train)
+
+        y_pred = model.predict(X_test)
+        acc = accuracy_score(y_test, y_pred)
+        print(f"   Test Accuracy: {acc:.4f}")
+        print(classification_report(y_test, y_pred, target_names=["Benign", "XSS"]))
+
+        # Save
+        joblib.dump(model, os.path.join(MODELS_DIR, "xss_brain_model.pkl"))
+        joblib.dump(vectorizer, os.path.join(MODELS_DIR, "xss_brain_vectorizer.pkl"))
+        print("✅ XSS Brain Saved.")
+    except Exception as e:
+        print(f"❌ Failed to train XSS Brain: {e}")
+
+
 def train_network_shield():
     print("\n🛡️ --- Training General Network Shield (CIC-IoT-2023) ---")
     # This expects the massive Kaggle dataset.
@@ -288,6 +317,7 @@ def train_network_shield():
 # ==========================================
 if __name__ == "__main__":
     train_web_brain()
+    train_xss_brain()
     train_agri_brain()
     train_health_brain()
     train_urban_brain()

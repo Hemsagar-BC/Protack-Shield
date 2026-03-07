@@ -15,6 +15,20 @@ PORT = int(os.environ.get("PORT", 8002))
 ALERT_MANAGER_URL = os.environ.get("ALERT_MANAGER_URL", "http://localhost:8003")
 MODEL_SERVICE_URL = os.environ.get("MODEL_SERVICE_URL", "http://localhost:8006")
 
+# ML detection cooldown to prevent alert spam (keyed by rule_id + source_ip)
+import time as _time
+_ml_cooldown: dict = {}
+ML_COOLDOWN_SECONDS = 30  # 30 seconds between same ML alert type from same IP
+
+def _ml_on_cooldown(rule_id: str, source_ip: str) -> bool:
+    key = f"{rule_id}:{source_ip}"
+    now = _time.time()
+    last = _ml_cooldown.get(key, 0)
+    if now - last < ML_COOLDOWN_SECONDS:
+        return True
+    _ml_cooldown[key] = now
+    return False
+
 class TelemetryEvent(BaseModel):
     event_id: str
     source_ip: str
@@ -161,17 +175,20 @@ async def call_ml_service(event_dict: dict) -> List[AnomalyOutput]:
         # For Auth attempts, use username as payload for SQLi/Pattern detection
         text_payload = payload.get("query") or payload.get("username") or ""
 
+        # Use actual network_data from the event if present, otherwise build defaults
+        network_data = payload.get("network_data", {
+            "Rate": payload.get("requests", 0) * 100,
+            "syn_count": payload.get("syn_count", payload.get("network", 0)),
+            "rst_count": 0,
+            "IAT": 500,
+            "Number": payload.get("requests", 5)
+        })
+
         ml_request = {
             "sector": domain,
             "payload": text_payload,
             "sensor_data": payload.get("sensor_data", []),
-            "network_data": {
-                "Rate": payload.get("requests", 0) * 100,
-                "syn_count": payload.get("syn_count", payload.get("network", 0)),
-                "rst_count": 0,
-                "IAT": 500,
-                "Number": payload.get("requests", 5)
-            }
+            "network_data": network_data
         }
 
         async with aiohttp.ClientSession() as session:
@@ -185,9 +202,14 @@ async def call_ml_service(event_dict: dict) -> List[AnomalyOutput]:
 
                     # Check if ML flagged this as a threat
                     if result.get("status") == "blocked" or result.get("threat_level") in ["high", "critical"]:
+                        ml_rule_id = "ml_" + result.get("source", "network_shield").lower().replace(" ", "_")
+                        source_ip = event_dict.get("source_ip", "unknown")
+                        if _ml_on_cooldown(ml_rule_id, source_ip):
+                            return ml_anomalies
+
                         ml_anomalies.append(AnomalyOutput(
                             anomaly_id=str(uuid.uuid4()),
-                            rule_id="ml_" + result.get("source", "network_shield").lower().replace(" ", "_"),
+                            rule_id=ml_rule_id,
                             rule_name=f"🧠 ML: {result.get('source', 'AI Detection')}",
                             severity=result.get("threat_level", "high"),
                             confidence=result.get("score", 0.85),
